@@ -4,7 +4,7 @@ import unittest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
-from dsparse.semantic_chunking import get_target_num_chunks, check_for_fallback_chunking_usage, get_chunk_text
+from dsParse.dsparse.chunking import get_target_num_chunks, check_for_fallback_chunking_usage, get_chunk_text
 
 
 class TestGetTargetNumChunks(unittest.TestCase):
