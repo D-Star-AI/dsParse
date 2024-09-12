@@ -25,9 +25,9 @@ YOU MUST CREATE BETWEEN {min_chunks} and {max_chunks} CHUNKS.
 """
 
 
-def get_target_num_chunks(text: str, max_characters: int = 2000) -> List[int]:
+def get_target_num_chunks(text: str, min_length_for_chunking: int) -> List[int]:
     """ This function will return the number of chunks that the text should be divided into """
-    expected_num_chunks = len(text) // max_characters + 1
+    expected_num_chunks = len(text) // min_length_for_chunking + 1
 
     if expected_num_chunks < 2:
         return 1, 2
@@ -90,16 +90,43 @@ def get_structured_chunks(document_with_line_numbers: str, start_line: int, min_
         )
     else:
         raise ValueError("Invalid provider. Must be either 'anthropic' or 'openai'.")
-    
 
-def get_chunks_from_segments(segments: List[Dict[str, Any]], document_lines: List[str], llm_provider: str, model: str, chunk_size: int = 800, min_length_for_chunking: int = 2000,) -> List[Dict[str, Any]]:
 
-    all_chunk_dicts = []
+def get_sections_and_chunks_naive(document_text: str, chunk_size: int) -> List[str]:
+
+    sections = [{
+        "section_title": "",
+        "section_text": document_text
+    }]
+
     chunk_index = 0
-    for i,segment in enumerate(segments):
 
-        start_index = segment["start"]
-        end_index = segment["end"]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=0, length_function=len)
+    texts = text_splitter.create_documents([document_text])
+    new_chunks = [text.page_content for text in texts]
+    chunk_dicts = []
+    for chunk in new_chunks:
+        chunk_dicts.append({
+            "chunk_text": chunk,
+            "chunk_index": chunk_index,
+        })
+        chunk_index += 1
+    
+    sections["chunks"] = chunk_dicts
+    
+    return sections
+
+
+def get_chunks_from_sections(sections: List[Dict[str, Any]], document_lines: List[str], llm_provider: str, model: str, chunk_size: int = 800, min_length_for_chunking: int = 2000, chunking_method: str = "semantic") -> List[Dict[str, Any]]:
+
+    formatted_sections = []
+    chunk_index = 0
+    for i, section in enumerate(sections):
+
+        chunk_dicts = []
+
+        start_index = section["start"]
+        end_index = section["end"]
         
         # Annotate the document lines with line numbers
         document_with_line_numbers = ""
@@ -110,20 +137,25 @@ def get_chunks_from_segments(segments: List[Dict[str, Any]], document_lines: Lis
         if (len(document_with_line_numbers) < min_length_for_chunking):
             # The entire section will be one chunk
             chunk_text = get_chunk_text(start_index, end_index, document_lines)
-            all_chunk_dicts.append({
+            chunk_dicts.append({
                 "chunk_text": chunk_text,
                 "chunk_index": chunk_index,
             })
             chunk_index += 1
+
+            formatted_sections.append({
+                "section_title": section["title"],
+                "section_text": section["content"],
+                "chunks": chunk_dicts
+            })
+            
             continue
 
-        min_num_chunks, max_num_chunks = get_target_num_chunks(document_with_line_numbers)
-        structured_chunks = get_structured_chunks(document_with_line_numbers, start_index, min_num_chunks, max_num_chunks, llm_provider, model)
-        new_chunks = structured_chunks.chunks
+        min_num_chunks, max_num_chunks = get_target_num_chunks(document_with_line_numbers, min_length_for_chunking)
         use_fallback = check_for_fallback_chunking_usage(min_num_chunks, max_num_chunks, new_chunks)
 
-        if use_fallback:
-            # Fallback to basic character chunking
+        if use_fallback or chunking_method == "naive":
+            # Use basic character chunking
             document_text = ""
             for i in range(start_index, end_index+1):
                 document_text += f"{document_lines[i]}\n"
@@ -137,9 +169,12 @@ def get_chunks_from_segments(segments: List[Dict[str, Any]], document_lines: Lis
                     "chunk_index": chunk_index,
                 })
                 chunk_index += 1
-            all_chunk_dicts.extend(chunk_dicts)
+            chunk_dicts.extend(chunk_dicts)
         
         else:
+
+            structured_chunks = get_structured_chunks(document_with_line_numbers, start_index, min_num_chunks, max_num_chunks, llm_provider, model)
+            new_chunks = structured_chunks.chunks
 
             # We need to get the chunk content from the document_lines
             for i,chunk in enumerate(new_chunks):
@@ -148,10 +183,17 @@ def get_chunks_from_segments(segments: List[Dict[str, Any]], document_lines: Lis
                 else:
                     end_index = new_chunks[i+1].start_index - 1
                 chunk_text = get_chunk_text(chunk.start_index, end_index, document_lines)
-                all_chunk_dicts.append({
+                chunk_dicts.append({
                     "chunk_text": chunk_text,
                     "chunk_index": chunk_index,
                 })
                 chunk_index += 1
+        
+
+        formatted_sections.append({
+            "section_title": section["title"],
+            "section_text": section["content"],
+            "chunks": chunk_dicts
+        })
     
-    return all_chunk_dicts
+    return formatted_sections
