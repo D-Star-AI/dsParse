@@ -1,6 +1,5 @@
 import PyPDF2
 import docx2txt
-import requests
 
 """ Basic file parsing functions """
 def extract_text_from_pdf(file_path):
