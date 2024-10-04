@@ -36,6 +36,8 @@ Your response should have two parts:
 
 def add_box_to_image(image_path: str, bounding_box: list[int], save_path: str, color: str = "red"):
     """
+    This function adds a bounding box to an image and saves the image with the bounding box drawn on it.
+    
     Inputs:
     - image_path: str, path to the image file
     - bounding_box: list[int], list of integers representing the bounding box coordinates in the format [ymin, xmin, ymax, xmax]
@@ -60,7 +62,7 @@ def add_box_to_image(image_path: str, bounding_box: list[int], save_path: str, c
         # Save the image with the bounding box
         img.save(save_path)
 
-def make_llm_call_gemini(image_path: str, model: str = "gemini-1.5-pro-002", max_tokens: int = 4000) -> str:
+def make_llm_call_gemini(image_path: str, model: str = "gemini-1.5-pro-002", max_tokens: int = 1000) -> str:
     project_id = "brilliant-era-430616-a1"
     vertexai.init(project=project_id, location="us-central1")
     model = gm.GenerativeModel(model)
@@ -74,25 +76,35 @@ def make_llm_call_gemini(image_path: str, model: str = "gemini-1.5-pro-002", max
     )
     return response.text
 
+def get_improved_bounding_box(image_path: str, bounding_box: list[int]):
+    """
+    This function takes in the path to the page image and the bounding box coordinates, and returns an improved bounding box.
 
-page_number = 24
-image_path = f"/Users/zach/Code/pdf_to_images/mck_energy/page_{page_number}.png"
-#bounding_box = [298, 330, 540, 925] # [ymin, xmin, ymax, xmax]
-bounding_box = [315, 432, 577, 703]
+    Inputs:
+    - image_path: str, path to the image file
+    - bounding_box: list[int], list of integers representing the bounding box coordinates in the format [ymin, xmin, ymax, xmax]
 
-image_path_w_bbox = f"/Users/zach/Code/pdf_to_images/mck_energy/page_{page_number}_with_box.png"
-add_box_to_image(image_path, bounding_box, image_path_w_bbox, color="red")
+    Returns:
+    - new_bbox: list[int], list of integers representing the improved bounding box coordinates in the format [ymin, xmin, ymax, xmax]
+    """
+    image_path_w_bbox = f"{image_path}_with_box.png"
+    add_box_to_image(image_path, bounding_box, image_path_w_bbox, color="red")
+    llm_response = make_llm_call_gemini(image_path_w_bbox)
+    llm_response_parts = llm_response.split("\n")
+    new_bbox = json.loads(llm_response_parts[-1]) # TODO: add error handling for this
+    return new_bbox
 
-llm_response = make_llm_call_gemini(image_path_w_bbox)
-print(llm_response)
 
-# split the response into the CoT part and the new bounding box coordinates
-llm_response = llm_response.strip()
-llm_response = llm_response.split("\n")[-1]
+# Example usage
+if __name__ == "__main__":
+    page_number = 24
+    image_path = f"/Users/zach/Code/pdf_to_images/mck_energy/page_{page_number}.png"
+    #bounding_box = [298, 330, 540, 925] # [ymin, xmin, ymax, xmax]
+    bounding_box = [315, 432, 577, 703]
 
-# parse the response to get the new bounding box coordinates - just load as json
-new_bounding_box = json.loads(llm_response.strip())
-print(new_bounding_box)
+    # get an improved bounding box
+    new_bounding_box = get_improved_bounding_box(image_path, bounding_box)
 
-# add a new bounding box to the image
-add_box_to_image(image_path_w_bbox, new_bounding_box, image_path_w_bbox, color="green")
+    # add a new bounding box to the image
+    image_path_w_bbox = f"{image_path}_with_box.png"
+    add_box_to_image(image_path_w_bbox, new_bounding_box, image_path_w_bbox, color="green")
