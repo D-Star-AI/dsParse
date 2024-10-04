@@ -226,7 +226,7 @@ def parse_file(pdf_path: str, image_folder_path: str) -> list[dict]:
     image_file_names = [f for f in image_file_names if f.endswith(".png")] # ignore any non-image files (like .DS_Store)
     sorted_image_file_names = sorted(image_file_names, key=lambda x: int(x.split("_")[1].split(".")[0])) # sort by page number
     all_page_content = []
-    for i, image_path in sorted_image_file_names[0:5]:
+    for i, image_path in enumerate(sorted_image_file_names[0:5]):
         print (f"Processing {image_path}")
         image_path = os.path.join(image_folder_path, image_path)
         page_content = parse_page(image_path, page_number=i+1)
