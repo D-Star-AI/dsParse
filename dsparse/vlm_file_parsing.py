@@ -49,11 +49,6 @@ Additional instructions
 - Image and Figure elements MUST have accurate bounding boxes.
 """
 
-class Element(TypedDict):
-    type: str
-    content: str
-    image_bounding_box: list
-
 response_schema = {
     "type": "array",
     "items": {
@@ -79,18 +74,38 @@ response_schema = {
     },
 }
 
-def pdf_to_images(pdf_path, output_folder, dpi=150):
-    # Create the output folder if it doesn't exist
-    os.makedirs(output_folder, exist_ok=True)
+def pdf_to_images(pdf_path: str, page_images_path: str, dpi=150) -> list[str]:
+    """
+    Convert a PDF to images and save them to a folder. Uses pdf2image (which relies on poppler).
+
+    Inputs:
+    - pdf_path: str - the path to the PDF file.
+    - page_images_path: str - the path to the folder where the images will be saved.
+
+    Returns:
+    - image_file_paths: list[str] - a list of the paths to the saved images.
+    """
+    # Delete the folder if it already exists
+    if os.path.exists(page_images_path):
+        for file in os.listdir(page_images_path):
+            os.remove(os.path.join(page_images_path, file))
+        os.rmdir(page_images_path)
+
+    # Create the folder
+    os.makedirs(page_images_path, exist_ok=False)
 
     # Convert PDF to images
     images = convert_from_path(pdf_path, dpi=dpi)
 
     # Save each image
+    image_file_paths = []
     for i, image in enumerate(images):
-        image.save(os.path.join(output_folder, f'page_{i+1}.png'), 'PNG')
+        image_file_path = os.path.join(page_images_path, f'page_{i+1}.png')
+        image.save(image_file_path, 'PNG')
+        image_file_paths.append(image_file_path)
 
-    print(f"Converted {len(images)} pages to images in {output_folder}")
+    print(f"Converted {len(images)} pages to images in {page_images_path}")
+    return image_file_paths
 
 def encode_image(image_path):
   with open(image_path, "rb") as image_file:
@@ -110,50 +125,30 @@ def make_llm_call_gemini(image_path: str, model: str = "gemini-1.5-pro-002", max
     )
     return response.text
 
-def extract_images(page_image_file_path: str, page_number: int, bounding_boxes: list[list], output_folder: str, padding: int = 100):
+def extract_image(page_image_path: str, bounding_box: list[int], extracted_image_path: str, padding: int = 100):
     """
-    Given a page image and a list of bounding boxes, extract the images from the bounding boxes by cropping the page image.
-    - Leave a bit of extra padding around the provided bounding boxes to ensure that the entire content is captured.
+    Given a page image and a bounding box, extract the image from the bounding boxes by cropping the page image.
+    - Leave a bit of extra padding around the provided bounding box to ensure that the entire content is captured.
 
     Inputs:
     - page_image_file_path: str, path to the page image
-    - page_number: int, the page number (used for naming the extracted images)
-    - bounding_boxes: list, list of bounding boxes in the format [ymin, xmin, ymax, xmax], where (xmin, ymin) is the top-left corner and (xmax, ymax) is the bottom-right corner and the top-left corner is (0, 0)
-    - output_folder: str, path to the output folder where the extracted images will be saved
+    - bounding_box: list[int], bounding box in the format [ymin, xmin, ymax, xmax], where (xmin, ymin) is the top-left corner and (xmax, ymax) is the bottom-right corner and the top-left corner is (0, 0)
+    - extracted_image_path: str, path where the extracted images will be saved - should include the image name and extension
     - padding: int, padding around the VLM-generated bounding boxes to include extra content, provided in 1000x1000 coordinate space
 
     Outputs:
     - Saves the extracted images to the output folder
     """
-    for bounding_box in bounding_boxes:
-        ymin, xmin, ymax, xmax = bounding_box
-        
-        # Add some padding to the bounding box
-        xmin = max(0, xmin - padding)
-        ymin = max(0, ymin - padding)
-        xmax = min(1000, xmax + padding)
-        ymax = min(1000, ymax + padding)
-
-        # Crop the image using the bounding box
-        output_path = os.path.join(output_folder, f"image_page_{page_number}_bbox_{xmin}_{ymin}_{xmax}_{ymax}.png")
-        crop_image(page_image_file_path, [ymin, xmin, ymax, xmax], output_path)
-
-def crop_image(image_path, bounding_box, output_path=None):
-    """
-    Crops an image based on the provided bounding box and saves the cropped image.
-
-    Inputs:
-    - image_path (str): Path to the original image.
-    - bounding_box (list of int): [ymin, xmin, ymax, xmax] coordinates scaled as if the image was 1000x1000.
-    - output_path (str, optional): Path to save the cropped image. 
-                                   If not provided, appends '_cropped' to the original filename.
-
-    Outputs:
-    - Saves the cropped image to the specified output path.
-    """
+    ymin, xmin, ymax, xmax = bounding_box
+    
+    # Add some padding to the bounding box
+    xmin = max(0, xmin - padding)
+    ymin = max(0, ymin - padding)
+    xmax = min(1000, xmax + padding)
+    ymax = min(1000, ymax + padding)
 
     # Open the image
-    with Image.open(image_path) as img:
+    with Image.open(page_image_path) as img:
         width, height = img.size
         print(f"Original image size: {width}x{height}")
 
@@ -173,31 +168,27 @@ def crop_image(image_path, bounding_box, output_path=None):
         # Crop the image
         cropped_img = img.crop((actual_xmin, actual_ymin, actual_xmax, actual_ymax)) # the order is (left, top, right, bottom) for the crop function
 
-        # Determine output path
-        if output_path is None:
-            base, ext = os.path.splitext(image_path)
-            output_path = f"{base}_cropped{ext}"
-
         # Save the cropped image
-        cropped_img.save(output_path)
-        print(f"Cropped image saved to: {output_path}")
+        cropped_img.save(extracted_image_path)
+        print(f"Cropped image saved to: {extracted_image_path}")
 
-def parse_page(image_path: str, page_number: int) -> list[dict]:
+def parse_page(page_image_path: str, page_number: int, save_path: str) -> list[dict]:
     """
     Given an image of a page, use LLM to extract the content of the page.
 
     Inputs:
-    - image_path: str, path to the image of the page
+    - page_image_path: str, path to the image of the page
     - page_number: int, the page number
+    - save_path: str, path to the base directory where everything is saved (i.e. {user_id}/{job_id})
     
     Outputs:
     - page_content: list of dictionaries, each containing information about an element on the page
     """
-    llm_output = make_llm_call_gemini(image_path)
+    llm_output = make_llm_call_gemini(page_image_path)
     try:
         page_content = json.loads(llm_output)
     except json.JSONDecodeError:
-        print(f"Error decoding JSON response from LLM for {image_path}")
+        print(f"Error decoding JSON response from LLM for {page_image_path}")
         print(llm_output)
         page_content = []
 
@@ -208,51 +199,62 @@ def parse_page(image_path: str, page_number: int) -> list[dict]:
             bounding_box = element["bounding_box"]
 
             # run the bounding box through the bounding box retry function to improve accuracy
-            bounding_box = get_improved_bounding_box(image_path, bounding_box)
+            bounding_box = get_improved_bounding_box(page_image_path, bounding_box, i)
             element["improved_bounding_box"] = bounding_box
 
+            # create the directory to save the extracted images if it doesn't exist
+            if not os.path.exists(f"{save_path}/extracted_images"):
+                os.makedirs(f"{save_path}/extracted_images")
+
             print(f"Extracting image from bounding box: {bounding_box}")
-            extract_images(image_path, page_number, [bounding_box], "extracted_images")
+            extracted_image_path = os.path.join(save_path, f"extracted_images/page_{page_number}_image_{i}.png")
+            extract_image(page_image_path, bounding_box, extracted_image_path)
 
             # add image path to the element
-            element["image_path"] = f"extracted_images/image_page_{page_number}_bbox_{i}.png"
+            element["image_path"] = extracted_image_path
             i += 1
 
     return page_content
 
-def parse_file(pdf_path: str, image_folder_path: str) -> list[dict]:
-    pdf_to_images(pdf_path, image_folder_path)
-    image_file_names = os.listdir(image_folder_path)
-    image_file_names = [f for f in image_file_names if f.endswith(".png")] # ignore any non-image files (like .DS_Store)
-    sorted_image_file_names = sorted(image_file_names, key=lambda x: int(x.split("_")[1].split(".")[0])) # sort by page number
+def parse_file(pdf_path: str, save_path: str) -> list[dict]:
+    """
+    Given a PDF file, extract the content of each page using a VLM model.
+
+    Inputs
+    - pdf_path: str, path to the PDF file
+    - save_path: str, path to the base directory where everything is saved (i.e. {user_id}/{job_id})
+
+    Outputs
+    - all_page_content: list of dictionaries, each containing information about an element on a page, for all pages in the PDF, in order
+    """
+    page_images_path = f"{save_path}/page_images"
+    image_file_paths = pdf_to_images(pdf_path, page_images_path)
     all_page_content = []
-    for i, image_path in enumerate(sorted_image_file_names[0:5]):
+    for i, image_path in enumerate(image_file_paths[0:5]):
         print (f"Processing {image_path}")
-        image_path = os.path.join(image_folder_path, image_path)
-        page_content = parse_page(image_path, page_number=i+1)
+        page_content = parse_page(image_path, page_number=i+1, save_path=save_path)
         all_page_content.extend(page_content)
-        time.sleep(10) # sleep for 10 seconds to avoid rate limit issues with the Gemini API
+        time.sleep(7) # sleep for a few seconds to avoid rate limit issues with the Gemini API
+
+    # save the extracted content to a JSON file
+    output_file_path = f"{save_path}/elements.json"
+    with open(output_file_path, "w") as f:
+        json.dump(all_page_content, f, indent=2)
 
     return all_page_content
 
 
 if __name__ == "__main__":
-    #pdf_path = '/Users/zach/Code/dsRAG/tests/data/levels_of_agi.pdf'
+    user_id = "zmcc"
+
+    pdf_path = '/Users/zach/Code/dsRAG/tests/data/levels_of_agi.pdf'
+    file_id = "levels_of_agi"
+    
     #pdf_path = '/Users/zach/Code/GDOT-Tech Assessment - RFQ.pdf'
-    pdf_path = "/Users/zach/Code/mck_energy.pdf"
+    #file_id = "gdot_tech_assessment"
+    
+    #pdf_path = "/Users/zach/Code/mck_energy.pdf"
+    #file_id = "mck_energy"
 
-    image_folder_path = 'pdf_to_images/mck_energy'
-    #image_folder_path = 'pdf_to_images/levels_of_agi'
-
-    all_page_content = parse_file(pdf_path, image_folder_path)
-
-    #page_number = 24
-    #image_path = f"/Users/zach/Code/pdf_to_images/mck_energy/page_{page_number}.png"
-    #image_path = f"/Users/zach/Code/pdf_to_images/levels_of_agi/page_{page_number}.png"
-    #all_page_content = parse_page(image_path, page_number)
-
-    # save the extracted content to a JSON file
-    output_file = "extracted_content_mck_energy.json"
-    #output_file = "extracted_content_levels_of_agi.json"
-    with open(output_file, "w") as f:
-        json.dump(all_page_content, f, indent=2)
+    save_path = f"{user_id}/{file_id}" # base directory to save the page images, pages with bounding boxes, and extracted images
+    parse_file(pdf_path, save_path)

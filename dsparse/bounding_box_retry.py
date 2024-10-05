@@ -34,17 +34,17 @@ Your response should have two parts:
 """.strip()
 
 
-def add_box_to_image(image_path: str, bounding_box: list[int], save_path: str, color: str = "red"):
+def add_box_to_image(page_image_path: str, bounding_box: list[int], save_path: str, color: str = "red"):
     """
     This function adds a bounding box to an image and saves the image with the bounding box drawn on it.
     
     Inputs:
-    - image_path: str, path to the image file
+    - page_image_path: str, path to the image file
     - bounding_box: list[int], list of integers representing the bounding box coordinates in the format [ymin, xmin, ymax, xmax]
     - save_path: str, path to save the image with the bounding box drawn on it
     """
 
-    with Image.open(image_path) as img:
+    with Image.open(page_image_path) as img:
         width, height = img.size
         print(f"Original image size: {width}x{height}")
 
@@ -76,19 +76,20 @@ def make_llm_call_gemini(image_path: str, model: str = "gemini-1.5-pro-002", max
     )
     return response.text
 
-def get_improved_bounding_box(image_path: str, bounding_box: list[int]):
+def get_improved_bounding_box(page_image_path: str, bounding_box: list[int], counter: int = 0):
     """
     This function takes in the path to the page image and the bounding box coordinates, and returns an improved bounding box.
 
     Inputs:
-    - image_path: str, path to the image file
+    - page_image_path: str, path to the image file
     - bounding_box: list[int], list of integers representing the bounding box coordinates in the format [ymin, xmin, ymax, xmax]
+    - counter: int, the counter for the number of times this function has been called for a given page; used to ensure file uniqueness
 
     Returns:
     - new_bbox: list[int], list of integers representing the improved bounding box coordinates in the format [ymin, xmin, ymax, xmax]
     """
-    image_path_w_bbox = f"{image_path}_with_box.png"
-    add_box_to_image(image_path, bounding_box, image_path_w_bbox, color="red")
+    image_path_w_bbox = f"{page_image_path}_with_box_{counter}.png"
+    add_box_to_image(page_image_path, bounding_box, image_path_w_bbox, color="red")
     llm_response = make_llm_call_gemini(image_path_w_bbox)
     llm_response_parts = llm_response.split("\n")
     new_bbox = json.loads(llm_response_parts[-1]) # TODO: add error handling for this
